@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./Home.css";
 
 const Home = () => {
@@ -7,7 +8,9 @@ const Home = () => {
   const [isFileUploaded, setisFileUploaded] = useState(false);
   const [isFileUpload, setisFileUpload] = useState(false);
   const [uploadProgress, setUploadedProgress] = useState(0);
-  const [resMsg, setResmsg] = useState("");
+  const [resMsg, setResmsg] = useState(null);
+
+  const navigate = useNavigate();
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -29,6 +32,7 @@ const Home = () => {
   const handleChange = (e) => {
     console.log(e.target.files);
     setFile(e.target.files[0]);
+    setisFileUpload(true);
   };
 
   const handleUpload = () => {
@@ -88,13 +92,14 @@ const Home = () => {
               />
             )}
             {isFileUploaded &&
-              (resMsg.status === "Success" ? (
+              (resMsg.status === 201 ? (
                 <>
                   <p className="sucessMsg">{resMsg.message}</p>
                   <button
                     onClick={() => {
-                      setisFileUpload(false);
-                      setFile(null);
+                      navigate("/test", {
+                        state: { filename: file.name },
+                      });
                     }}
                   >
                     Continue
