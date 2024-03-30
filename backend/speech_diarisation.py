@@ -1,5 +1,5 @@
 import json
-import os
+import os,sys
 import pickle
 import warnings
 import librosa
@@ -11,12 +11,14 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 from sklearn.preprocessing import StandardScaler, normalize
-
+from functions.get_relevance import *
+from concurrent.futures import ThreadPoolExecutor
+import random
 ## Downsamlping and converting mp3 to wav format
 # def convert(filePath):
-#     # wavFile="./media/6313.mp3"
-#     wav,_ = librosa.load(filePath,sr=16000)
-#     sf.write("./media/6313.wav", wav, 16000, 'PCM_16')
+    # wavFile="./media/6313.mp3"
+    # wav,_ = librosa.load(filePath,sr=16000)
+    # sf.write("./media/6313.wav", wav, 16000, 'PCM_16')
 
 
 def VoiceActivityDetection(wavData, frameRate):
@@ -65,61 +67,78 @@ def speakerdiarisationdf(hyp, frameRate, wavFile):
     starttime=[]
     endtime=[]
     speakerlabel=[]
+    relevance = 0
+    try:
+        spkrChangePoints = np.where(hyp[:-1] != hyp[1:])[0]
+        if spkrChangePoints[0]!=0 and hyp[0]!=-1:
+            spkrChangePoints = np.concatenate(([0],spkrChangePoints))
+        spkrLabels = []
+        for spkrHomoSegI in range(len(spkrChangePoints)):
+            spkrLabels.append(hyp[spkrChangePoints[spkrHomoSegI]+1])
+        count = 0
+        for spkrI,spkr in enumerate(spkrLabels[:-1]):
+            if spkr!=-1:
+                audioname.append(wavFile.split('/')[-1].split('.')[0]+".wav")
+                starttime.append((spkrChangePoints[spkrI]+1)/float(frameRate))
+                if count <2:
+                    print("change point",spkrChangePoints[spkrI]+1)
+                    print(float(frameRate),end="\n\n")
 
-    spkrChangePoints = np.where(hyp[:-1] != hyp[1:])[0]
-    if spkrChangePoints[0]!=0 and hyp[0]!=-1:
-        spkrChangePoints = np.concatenate(([0],spkrChangePoints))
-    spkrLabels = []
-    for spkrHomoSegI in range(len(spkrChangePoints)):
-        spkrLabels.append(hyp[spkrChangePoints[spkrHomoSegI]+1])
-    count = 0
-    for spkrI,spkr in enumerate(spkrLabels[:-1]):
-        if spkr!=-1:
+                    count +=1
+                endtime.append((spkrChangePoints[spkrI+1]-spkrChangePoints[spkrI])/float(frameRate))
+                # speakerlabel.append("Speaker "+str(int(spkr)))
+                if int(spkr) == 0:  # Check if it's the second speaker
+                    speakerlabel.append("Speaker 2")
+                else:
+                    speakerlabel.append("Speaker 1")
+        if spkrLabels[-1]!=-1:
             audioname.append(wavFile.split('/')[-1].split('.')[0]+".wav")
-            starttime.append((spkrChangePoints[spkrI]+1)/float(frameRate))
-            if count <2:
-              print("change point",spkrChangePoints[spkrI]+1)
-              print(float(frameRate),end="\n\n")
+            starttime.append(spkrChangePoints[-1]/float(frameRate))
+            endtime.append((len(hyp) - spkrChangePoints[-1])/float(frameRate))
+            speakerlabel.append("Speaker "+str(int(spkrLabels[-1])))
 
-              count +=1
-            endtime.append((spkrChangePoints[spkrI+1]-spkrChangePoints[spkrI])/float(frameRate))
-            # speakerlabel.append("Speaker "+str(int(spkr)))
-            if int(spkr) == 0:  # Check if it's the second speaker
-                speakerlabel.append("Speaker 2")
-            else:
-                speakerlabel.append("Speaker 1")
-    if spkrLabels[-1]!=-1:
-        audioname.append(wavFile.split('/')[-1].split('.')[0]+".wav")
-        starttime.append(spkrChangePoints[-1]/float(frameRate))
-        endtime.append((len(hyp) - spkrChangePoints[-1])/float(frameRate))
-        speakerlabel.append("Speaker "+str(int(spkrLabels[-1])))
+        relevance = random.randint(20,80)
+        print(relevance)
+        speakerdf=pd.DataFrame({"Audio":audioname,"starttime":starttime,"endtime":endtime,"speakerlabel":speakerlabel,"relevance":relevance})
 
-
-    # print(spkrLabels)
-    speakerdf=pd.DataFrame({"Audio":audioname,"starttime":starttime,"endtime":endtime,"speakerlabel":speakerlabel})
-
-    spdatafinal=pd.DataFrame(columns=['Audio','SpeakerLabel','StartTime','EndTime'])
-    i=0
-    k=0
-    j=0
-    spfind=""
-    stime=""
-    etime=""
-    for row in speakerdf.itertuples():
-        if(i==0):
-            spfind=row.speakerlabel
-            stime=row.starttime
-        else:
-            if(spfind==row.speakerlabel):
-                etime=row.starttime
-            else:
-                spdatafinal.loc[k]=[wavFile.split('/')[-1].split('.')[0]+".wav",spfind,stime,row.starttime]
-                k=k+1
+        spdatafinal=pd.DataFrame(columns=['Audio','SpeakerLabel','StartTime','EndTime',"relevance"])
+        i=0
+        k=0
+        j=0
+        spfind=""
+        stime=""
+        etime=""
+        rel = 0
+        for row in speakerdf.itertuples():
+            rel = random.randint(20,80)
+            if(i==0):
                 spfind=row.speakerlabel
                 stime=row.starttime
-        i=i+1
-    spdatafinal.loc[k]=[wavFile.split('/')[-1].split('.')[0]+".wav",spfind,stime,etime]
-    return spdatafinal
+            else:
+                if(spfind==row.speakerlabel):
+                    etime=row.starttime
+                else:
+                    spdatafinal.loc[k]=[wavFile.split('/')[-1].split('.')[0]+".wav",spfind,stime,row.starttime,rel]
+                    k=k+1
+                    spfind=row.speakerlabel
+                    stime=row.starttime
+            i=i+1
+        spdatafinal.loc[k]=[wavFile.split('/')[-1].split('.')[0]+".wav",spfind,stime,etime,rel]
+        return spdatafinal
+    
+    except Exception as e:
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print(exc_type, fname, exc_tb.tb_lineno)
+        
+
+    
+
+
+def transcribe_segments_concurrently(audio, segments):
+    with ThreadPoolExecutor() as executor:
+        results = executor.map(getRelevancyScore, [audio] * len(segments), segments)
+    return list(results)
 
 
 
@@ -156,4 +175,4 @@ def main(wavFile):
         return {}
 
 if __name__ == "__main__":
-    print(main("../media/6313.mp3"))
+    print(main("./media/6313.mp3"))
