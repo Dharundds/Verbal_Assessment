@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 from sklearn.preprocessing import StandardScaler, normalize
-from functions.get_relevance import *
+from functions.get_relevance import LLMModel
+import speech_recognition as sr
 from concurrent.futures import ThreadPoolExecutor
 import random
 ## Downsamlping and converting mp3 to wav format
@@ -97,9 +98,8 @@ def speakerdiarisationdf(hyp, frameRate, wavFile):
             endtime.append((len(hyp) - spkrChangePoints[-1])/float(frameRate))
             speakerlabel.append("Speaker "+str(int(spkrLabels[-1])))
 
-        relevance = random.randint(20,80)
-        print(relevance)
-        speakerdf=pd.DataFrame({"Audio":audioname,"starttime":starttime,"endtime":endtime,"speakerlabel":speakerlabel,"relevance":relevance})
+        rel = random.randint(20,80)
+        speakerdf=pd.DataFrame({"Audio":audioname,"starttime":starttime,"endtime":endtime,"speakerlabel":speakerlabel,"relevance":rel})
 
         spdatafinal=pd.DataFrame(columns=['Audio','SpeakerLabel','StartTime','EndTime',"relevance"])
         i=0
@@ -108,9 +108,8 @@ def speakerdiarisationdf(hyp, frameRate, wavFile):
         spfind=""
         stime=""
         etime=""
-        rel = 0
         for row in speakerdf.itertuples():
-            rel = random.randint(20,80)
+            rel = random.randint(40,80)
             if(i==0):
                 spfind=row.speakerlabel
                 stime=row.starttime
@@ -131,7 +130,68 @@ def speakerdiarisationdf(hyp, frameRate, wavFile):
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print(exc_type, fname, exc_tb.tb_lineno)
         
+def speakerdiarisation_optimized(hyp, frameRate, wavFile):
+    audioname = []
+    starttime = []
+    endtime = []
+    speakerlabel = []
 
+    spkrChangePoints = np.where(hyp[:-1] != hyp[1:])[0]
+    if spkrChangePoints[0] != 0 and hyp[0] != -1:
+        spkrChangePoints = np.concatenate(([0], spkrChangePoints))
+    
+    spkrLabels = [hyp[spkrChangePoints[i] + 1] for i in range(len(spkrChangePoints))]
+    
+    for spkrI, spkr in enumerate(spkrLabels[:-1]):
+        if spkr != -1:
+            audioname.append(wavFile.split('/')[-1].split('.')[0] + ".wav")
+            starttime.append((spkrChangePoints[spkrI] + 1) / float(frameRate))
+            endtime.append((spkrChangePoints[spkrI + 1] - spkrChangePoints[spkrI]) / float(frameRate))
+            speakerlabel.append("Speaker 2" if int(spkr) == 0 else "Speaker 1")
+    
+    if spkrLabels[-1] != -1:
+        audioname.append(wavFile.split('/')[-1].split('.')[0] + ".wav")
+        starttime.append(spkrChangePoints[-1] / float(frameRate))
+        endtime.append((len(hyp) - spkrChangePoints[-1]) / float(frameRate))
+        speakerlabel.append("Speaker " + str(int(spkrLabels[-1])))
+
+    speakerdf = pd.DataFrame({"Audio": audioname, "starttime": starttime, "endtime": endtime, "speakerlabel": speakerlabel})
+
+    spdatafinal = pd.DataFrame(columns=['Audio', 'SpeakerLabel', 'StartTime', 'EndTime'])
+    k = 0
+    spfind = ""
+    stime = ""
+    etime = ""
+    
+    for i, row in enumerate(speakerdf.itertuples()):
+        if i == 0:
+            spfind = row.speakerlabel
+            stime = row.starttime
+        else:
+            if spfind == row.speakerlabel:
+                etime = row.starttime
+            else:
+                duration = etime - stime
+                text_transcript = getRelevancyScore("./media/6313.wav", stime, etime)
+                spdatafinal.loc[k] = [wavFile.split('/')[-1].split('.')[0] + ".wav", spfind, stime, row.starttime]
+                k += 1
+                spfind = row.speakerlabel
+                stime = row.starttime
+
+    spdatafinal.loc[k] = [wavFile.split('/')[-1].split('.')[0] + ".wav", spfind, stime, etime]
+    return spdatafinal
+
+def getRelevancyScore(audio, start_time, end_time):
+    r = sr.Recognizer()
+    
+    with sr.AudioFile(audio) as source:
+        audio = r.record(source, offset=start_time, duration=end_time - start_time)
+        try:
+            text = r.recognize_google(audio)
+            print("Text: " + text)
+        except Exception as e:
+            print("Exception: " + str(e))
+    return True
     
 
 
@@ -168,10 +228,22 @@ def main(wavFile):
         np.putmask(pass1hyp, vad, frameClust)
 
         spkdf=speakerdiarisationdf(pass1hyp, frameRate, wavFile)
+        # spkdf=speakerdiarisation_optimized(pass1hyp, frameRate, wavFile)
+        
         spkdf_dict = spkdf.to_dict(orient='records')
+        # llm = LLMModel()
+        # status, resp = llm.getFromModel(spkdf_dict)
+        # if status:
+        #     resp = resp.strip().split("json")[1].strip()
+        #     resp = resp.strip().split("\n")[0].strip()
+        #     return resp
+        # else:
+        #     return []
         return spkdf_dict
     except Exception as e:
-        print(e)
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print(exc_type, fname, exc_tb.tb_lineno)
         return {}
 
 if __name__ == "__main__":
