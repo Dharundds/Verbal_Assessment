@@ -15,6 +15,7 @@ const Test = () => {
     { field: "SpeakerLabel", flex: 1 },
     { field: "StartTime", flex: 1 },
     { field: "EndTime", flex: 1 },
+    { field: "relevance", flex: 1 },
   ]);
 
   const location = useLocation();
